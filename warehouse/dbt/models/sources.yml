@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: raw_lake
+    description: "Raw Parquet files in MinIO (S3-compatible) lake bucket"
+    schema: main
+    tables:
+      - name: port_ops
+        description: "Raw port operations data"
+      - name: comtrade
+        description: "Raw UN Comtrade trade data"
+      - name: gdelt
+        description: "Raw GDELT event data"
+      - name: noaa
+        description: "Raw NOAA weather data"
+      - name: manifests
+        description: "Pipeline run manifests"

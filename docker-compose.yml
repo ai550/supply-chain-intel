@@ -1,0 +1,138 @@
+services:
+  postgres_meta:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: meta
+      POSTGRES_PASSWORD: meta
+      POSTGRES_DB: meta
+    volumes:
+      - postgres_meta:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio12345}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  minio_init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio} ${MINIO_ROOT_PASSWORD:-minio12345} &&
+      mc mb -p local/lake || true &&
+      mc mb -p local/logs || true &&
+      mc anonymous set download local/lake || true &&
+      echo 'MinIO buckets ready.'"
+    restart: "no"
+
+  airflow_webserver:
+    build:
+      context: ./docker/airflow
+    depends_on:
+      - postgres_meta
+      - minio
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://meta:meta@postgres_meta:5432/meta
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+      # MinIO access for ingestion jobs / duckdb httpfs config
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio12345}
+      LAKE_BUCKET: lake
+      DUCKDB_PATH: /opt/warehouse/warehouse.duckdb
+      # Put your dataset API keys here if needed (NOAA token, Comtrade key, etc.)
+      NOAA_TOKEN: ${NOAA_TOKEN:-}
+      COMTRADE_KEY: ${COMTRADE_KEY:-}
+    volumes:
+      - ./pipelines/orchestration/airflow/dags:/opt/airflow/dags
+      - ./pipelines:/opt/pipelines
+      - ./warehouse/dbt:/opt/dbt
+      - ./data/duckdb:/opt/warehouse
+    ports:
+      - "8080:8080"
+    command: >
+      bash -lc "
+      airflow db migrate &&
+      airflow users create
+        --username admin
+        --password admin
+        --firstname admin
+        --lastname admin
+        --role Admin
+        --email admin@example.com || true &&
+      airflow webserver"
+
+  airflow_scheduler:
+    build:
+      context: ./docker/airflow
+    depends_on:
+      - airflow_webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://meta:meta@postgres_meta:5432/meta
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio12345}
+      LAKE_BUCKET: lake
+      DUCKDB_PATH: /opt/warehouse/warehouse.duckdb
+      NOAA_TOKEN: ${NOAA_TOKEN:-}
+      COMTRADE_KEY: ${COMTRADE_KEY:-}
+    volumes:
+      - ./pipelines/orchestration/airflow/dags:/opt/airflow/dags
+      - ./pipelines:/opt/pipelines
+      - ./warehouse/dbt:/opt/dbt
+      - ./data/duckdb:/opt/warehouse
+    command: >
+      bash -lc "airflow scheduler"
+
+  dbt:
+    build:
+      context: ./docker/dbt
+    depends_on:
+      - minio
+    environment:
+      DUCKDB_PATH: /opt/warehouse/warehouse.duckdb
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio12345}
+      LAKE_BUCKET: lake
+    volumes:
+      - ./warehouse/dbt:/opt/dbt
+      - ./data/duckdb:/opt/warehouse
+    working_dir: /opt/dbt
+    entrypoint: ["bash", "-lc"]
+    command: ["dbt --version && tail -f /dev/null"]
+
+  superset:
+    build:
+      context: ./docker/superset
+    depends_on:
+      - postgres_meta
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-this_is_not_secure_change_me}
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://meta:meta@postgres_meta:5432/meta
+      # DuckDB file is local to container via volume; Superset will connect via duckdb engine
+    volumes:
+      - ./data/duckdb:/opt/warehouse
+      - superset_home:/app/superset_home
+    ports:
+      - "8088:8088"
+
+volumes:
+  postgres_meta:
+  minio_data:
+  superset_home:

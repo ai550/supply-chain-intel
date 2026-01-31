@@ -1,0 +1,24 @@
+name: supply_chain_intel
+version: '1.0.0'
+config-version: 2
+
+profile: supply_chain_intel
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  supply_chain_intel:
+    staging:
+      +materialized: view
+    dims:
+      +materialized: table
+    facts:
+      +materialized: table
+    marts:
+      +materialized: table

@@ -1,0 +1,6 @@
+boto3>=1.28
+duckdb>=0.10
+dbt-duckdb>=1.7
+pyarrow>=14.0
+requests>=2.31
+pandas>=2.1

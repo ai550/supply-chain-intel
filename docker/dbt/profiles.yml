@@ -1,0 +1,16 @@
+supply_chain_intel:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH') }}"
+      threads: 4
+      extensions:
+        - httpfs
+        - parquet
+      settings:
+        s3_endpoint: "{{ env_var('MINIO_ENDPOINT') }}"
+        s3_access_key_id: "{{ env_var('MINIO_ACCESS_KEY') }}"
+        s3_secret_access_key: "{{ env_var('MINIO_SECRET_KEY') }}"
+        s3_use_ssl: false
+        s3_url_style: path

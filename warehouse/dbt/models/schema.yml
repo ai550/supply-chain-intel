@@ -1,0 +1,176 @@
+version: 2
+
+models:
+  # ── Staging ──────────────────────────────────────────────
+  - name: stg_port_ops_daily
+    description: "Cleaned daily port operations from raw Parquet"
+    columns:
+      - name: date_key
+        tests: [not_null]
+      - name: port_name
+        tests: [not_null]
+
+  - name: stg_comtrade_monthly
+    description: "Cleaned monthly UN Comtrade trade records"
+    columns:
+      - name: month_key
+        tests: [not_null]
+      - name: reporter_iso3
+        tests: [not_null]
+
+  - name: stg_gdelt_events_daily
+    description: "Cleaned daily GDELT event aggregates"
+    columns:
+      - name: date_key
+        tests: [not_null]
+      - name: event_code
+        tests: [not_null]
+
+  - name: stg_noaa_weather_daily
+    description: "Cleaned daily NOAA weather observations"
+    columns:
+      - name: date_key
+        tests: [not_null]
+      - name: station_id
+        tests: [not_null]
+
+  # ── Dimensions ──────────────────────────────────────────
+  - name: dim_date
+    description: "Date dimension (2020-2030)"
+    columns:
+      - name: date_key
+        tests: [unique, not_null]
+      - name: date
+        tests: [not_null]
+
+  - name: dim_country
+    description: "Country dimension derived from staging data"
+    columns:
+      - name: country_key
+        tests: [unique, not_null]
+      - name: iso3
+        tests: [unique, not_null]
+
+  - name: dim_port
+    description: "Port dimension derived from port ops staging"
+    columns:
+      - name: port_key
+        tests: [unique, not_null]
+      - name: port_name
+        tests: [unique, not_null]
+
+  - name: dim_commodity
+    description: "Commodity dimension from Comtrade HS codes"
+    columns:
+      - name: commodity_key
+        tests: [unique, not_null]
+      - name: hs_code
+        tests: [not_null]
+
+  - name: dim_event_type
+    description: "GDELT event-type dimension with severity weights"
+    columns:
+      - name: event_type_key
+        tests: [unique, not_null]
+      - name: event_code
+        tests: [unique, not_null]
+      - name: severity_weight
+        description: "Weight used in disruption score calculation"
+
+  - name: dim_weather_station
+    description: "NOAA weather station dimension"
+    columns:
+      - name: station_key
+        tests: [unique, not_null]
+      - name: station_id
+        tests: [unique, not_null]
+
+  # ── Facts ───────────────────────────────────────────────
+  - name: fct_port_ops_daily
+    description: "Daily port operations metrics"
+    columns:
+      - name: date_key
+        tests: [not_null]
+      - name: port_key
+        tests: [not_null]
+      - name: teu_total
+        description: "Container throughput proxy (TEU)"
+
+  - name: fct_trade_monthly
+    description: "Monthly bilateral trade flows from UN Comtrade"
+    columns:
+      - name: month_key
+        tests: [not_null]
+      - name: reporter_country_key
+        tests: [not_null]
+      - name: trade_flow
+        tests:
+          - accepted_values:
+              values: ['import', 'export']
+
+  - name: fct_disruption_daily
+    description: "Daily disruption events from GDELT"
+    columns:
+      - name: date_key
+        tests: [not_null]
+      - name: event_type_key
+        tests: [not_null]
+      - name: disruption_score
+        description: "Weighted disruption score = event_count * severity_weight"
+
+  - name: fct_weather_daily
+    description: "Daily weather observations with anomaly score"
+    columns:
+      - name: date_key
+        tests: [not_null]
+      - name: station_key
+        tests: [not_null]
+      - name: weather_anomaly_score
+        description: "Heuristic score: extreme temp + precip + wind + storm"
+
+  # ── Marts ───────────────────────────────────────────────
+  - name: mart_port_strain_daily
+    description: "Composite port strain index with disruption/weather rollups"
+    columns:
+      - name: date_key
+        tests: [not_null]
+      - name: port_key
+        tests: [not_null]
+      - name: strain_index
+        description: "Weighted composite: TEU(0.25) + dwell(0.30) + wait(0.25) + truck(0.10) + disruption(0.07) + weather(0.03)"
+      - name: strain_bucket
+        tests:
+          - accepted_values:
+              values: ['low', 'medium', 'high', 'critical']
+
+  - name: mart_trade_impact_monthly
+    description: "Monthly trade values with MoM/YoY pct changes and strain/disruption context"
+    columns:
+      - name: month_key
+        tests: [not_null]
+      - name: reporter_country_key
+        tests: [not_null]
+      - name: commodity_key
+        tests: [not_null]
+
+  - name: mart_event_impact_windows
+    description: "Pre/post event strain and trade impact analysis (14d windows)"
+    columns:
+      - name: event_date_key
+        tests: [not_null]
+      - name: event_type_key
+        tests: [not_null]
+      - name: strain_delta
+        description: "Difference in avg strain: post-event minus pre-event"
+
+  - name: mart_pipeline_health
+    description: "Pipeline run status and latency from ingestion manifests"
+    columns:
+      - name: run_date
+        tests: [not_null]
+      - name: source_name
+        tests: [not_null]
+      - name: status
+        tests:
+          - accepted_values:
+              values: ['ok', 'warn', 'fail']

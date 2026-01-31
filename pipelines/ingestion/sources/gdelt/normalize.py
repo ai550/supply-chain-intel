@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import Any
 
@@ -24,7 +25,7 @@ def normalize(records: list[dict[str, Any]]) -> pa.Table:
         rows.append(
             {
                 "date": d,
-                "country_iso3": r.get("country_iso3"),
+                "country_iso3": _str(r.get("country_iso3")),
                 "event_code": str(r.get("event_code", "")),
                 "event_count": int(r.get("event_count", 0)),
                 "avg_tone": _float(r.get("avg_tone")),
@@ -35,6 +36,14 @@ def normalize(records: list[dict[str, Any]]) -> pa.Table:
         return pa.table({f.name: pa.array([], type=f.type) for f in GDELT_SCHEMA})
 
     return pa.Table.from_pylist(rows, schema=GDELT_SCHEMA)
+
+
+def _str(v: Any) -> str | None:
+    if v is None:
+        return None
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    return str(v)
 
 
 def _float(v: Any) -> float | None:

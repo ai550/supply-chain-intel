@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import pyarrow as pa
 
@@ -22,7 +22,7 @@ def write_manifest(
     started_at: datetime | None = None,
 ) -> str:
     """Write a manifest record for a pipeline run."""
-    now = datetime.now(datetime.timezone.utc)
+    now = datetime.now(UTC)
     latency = 0.0
     if started_at:
         latency = (now - started_at).total_seconds() / 3600.0

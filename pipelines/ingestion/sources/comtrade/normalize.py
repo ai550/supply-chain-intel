@@ -1,8 +1,9 @@
-"""Normalize raw Comtrade records into a PyArrow table."""
+"""Normalize raw Comtrade v1 API records into a PyArrow table."""
 
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 import pyarrow as pa
@@ -13,25 +14,32 @@ logger = logging.getLogger(__name__)
 
 
 def normalize(records: list[dict[str, Any]]) -> pa.Table:
-    """Convert raw Comtrade dicts to a PyArrow Table matching COMTRADE_SCHEMA."""
+    """Convert raw Comtrade v1 dicts to a PyArrow Table matching COMTRADE_SCHEMA.
+
+    Expected v1 fields: refYear, refMonth, reporterISO, partnerISO, cmdCode,
+    flowCode, primaryValue, netWgt, qty, qtyUnitAbbr.
+    """
     rows: list[dict[str, Any]] = []
     for r in records:
-        flow_code = r.get("flowCode", r.get("rgCode", ""))
-        flow = "import" if str(flow_code) in ("1", "M") else "export"
+        # Build YYYYMM period from refYear + refMonth, falling back to period string
+        period = _build_period(r)
+        if period is None:
+            continue
+
+        flow_code = str(r.get("flowCode", ""))
+        flow = "import" if flow_code == "M" else "export"
 
         rows.append(
             {
-                "period": _int(
-                    r.get("period", r.get("yr", 0)) if "period" in r else f"{r.get('yr', '')}{r.get('month', ''):>02}"
-                ),
-                "reporter_iso3": r.get("reporterISO", r.get("rtCode", "")),
-                "partner_iso3": r.get("partnerISO", r.get("ptCode", "")),
+                "period": period,
+                "reporter_iso3": _str(r.get("reporterISO")),
+                "partner_iso3": _str(r.get("partnerISO")),
                 "hs_code": str(r.get("cmdCode", "")),
                 "trade_flow": flow,
-                "trade_value_usd": _float(r.get("primaryValue", r.get("TradeValue"))),
-                "net_weight_kg": _float(r.get("netWgt", r.get("NetWeight"))),
-                "quantity": _float(r.get("qty", r.get("Qty"))),
-                "quantity_unit": r.get("qtyUnitAbbr", r.get("qtAltDesc", "")),
+                "trade_value_usd": _float(r.get("primaryValue")),
+                "net_weight_kg": _float(r.get("netWgt")),
+                "quantity": _float(r.get("qty")),
+                "quantity_unit": _str(r.get("qtyUnitAbbr")) or "",
             }
         )
 
@@ -41,19 +49,40 @@ def normalize(records: list[dict[str, Any]]) -> pa.Table:
     return pa.Table.from_pylist(rows, schema=COMTRADE_SCHEMA)
 
 
+def _build_period(r: dict[str, Any]) -> int | None:
+    """Build YYYYMM int from record fields."""
+    ref_year = r.get("refYear")
+    ref_month = r.get("refMonth")
+    if ref_year is not None and ref_month is not None:
+        try:
+            return int(ref_year) * 100 + int(ref_month)
+        except (TypeError, ValueError):
+            pass
+    # Fallback: period field may already be YYYYMM string/int
+    period = r.get("period")
+    if period is not None:
+        try:
+            return int(period)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _str(v: Any) -> str | None:
+    if v is None:
+        return None
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    return str(v)
+
+
 def _float(v: Any) -> float | None:
     if v is None:
         return None
     try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _int(v: Any) -> int | None:
-    if v is None:
-        return None
-    try:
-        return int(v)
+        val = float(v)
+        if math.isnan(val):
+            return None
+        return val
     except (TypeError, ValueError):
         return None

@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pipelines.ingestion.common.time import month_partition_path, parse_date, partition_path
 from pipelines.ingestion.load.manifest import write_manifest
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def ingest_port_ops(date_str: str) -> None:
-    started = datetime.utcnow()
+    started = datetime.now(UTC)
     target = parse_date(date_str)
 
     from pipelines.ingestion.sources.port_ops.extract import fetch_daily
@@ -38,7 +38,7 @@ def ingest_port_ops(date_str: str) -> None:
 
 
 def ingest_comtrade(date_str: str) -> None:
-    started = datetime.utcnow()
+    started = datetime.now(UTC)
     target = parse_date(date_str)
 
     from pipelines.ingestion.sources.comtrade.extract import fetch_monthly
@@ -53,7 +53,7 @@ def ingest_comtrade(date_str: str) -> None:
 
 
 def ingest_gdelt(date_str: str) -> None:
-    started = datetime.utcnow()
+    started = datetime.now(UTC)
     target = parse_date(date_str)
 
     from pipelines.ingestion.sources.gdelt.extract import fetch_daily
@@ -68,7 +68,7 @@ def ingest_gdelt(date_str: str) -> None:
 
 
 def ingest_noaa(date_str: str) -> None:
-    started = datetime.utcnow()
+    started = datetime.now(UTC)
     target = parse_date(date_str)
 
     from pipelines.ingestion.sources.noaa.extract import fetch_daily

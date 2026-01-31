@@ -1,6 +1,11 @@
-"""Extract trade data from UN Comtrade API.
+"""Extract trade data from UN Comtrade API (v1).
 
-Uses the Comtrade bulk/preview API (v1 or v2).
+Public preview endpoint (no key required, rate-limited):
+    https://comtradeapi.un.org/public/v1/preview/C/M/HS?flowCode=M&reporterCode=842&period=202301
+
+Subscription endpoint (requires COMTRADE_KEY):
+    https://comtradeapi.un.org/data/v1/get/C/M/HS?flowCode=M&reporterCode=842&period=202301
+
 Docs: https://comtradeapi.un.org/
 """
 
@@ -14,7 +19,20 @@ from pipelines.ingestion.common.http import get_json, rate_limit_wait
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://comtradeapi.un.org/data/v1/get/C/M"
+PUBLIC_URL = "https://comtradeapi.un.org/public/v1/preview/C/M/HS"
+SUBSCRIPTION_URL = "https://comtradeapi.un.org/data/v1/get/C/M/HS"
+
+# Numeric UN M49 reporter codes (extend as needed)
+REPORTER_CODES: dict[str, int] = {
+    "USA": 842,
+    "CHN": 156,
+    "DEU": 276,
+    "JPN": 392,
+    "KOR": 410,
+    "GBR": 826,
+    "NLD": 528,
+    "SGP": 702,
+}
 
 
 def fetch_monthly(
@@ -29,7 +47,7 @@ def fetch_monthly(
         year: 4-digit year
         month: 1-12
         reporter_codes: ISO3 country codes (default: ['USA'])
-        hs_codes: HS commodity codes to filter (default: broad set)
+        hs_codes: HS commodity codes to filter (default: all)
 
     Returns:
         List of raw record dicts.
@@ -38,28 +56,45 @@ def fetch_monthly(
     reporter_codes = reporter_codes or ["USA"]
     period = f"{year}{month:02d}"
 
-    records: list[dict[str, Any]] = []
-    for reporter in reporter_codes:
-        params: dict[str, Any] = {
-            "reporterCode": reporter,
-            "period": period,
-            "flowCode": "M,X",  # imports + exports
-        }
-        if hs_codes:
-            params["cmdCode"] = ",".join(hs_codes)
-
+    # Use subscription endpoint when key is available, otherwise public preview
+    if api_key:
+        base_url = SUBSCRIPTION_URL
+        headers = {"Ocp-Apim-Subscription-Key": api_key}
+    else:
+        base_url = PUBLIC_URL
         headers = {}
-        if api_key:
-            headers["Ocp-Apim-Subscription-Key"] = api_key
 
-        try:
-            data = get_json(BASE_URL, params=params, headers=headers)
-            dataset = data.get("data", data) if isinstance(data, dict) else data
-            if isinstance(dataset, list):
-                records.extend(dataset)
-        except Exception:
-            logger.exception("Comtrade fetch failed for reporter=%s period=%s", reporter, period)
-        rate_limit_wait(1.0)
+    records: list[dict[str, Any]] = []
+
+    for reporter_iso3 in reporter_codes:
+        reporter_num = REPORTER_CODES.get(reporter_iso3)
+        if reporter_num is None:
+            logger.warning("Unknown reporter code for %s, skipping", reporter_iso3)
+            continue
+
+        # Comtrade v1 requires separate calls per flowCode
+        for flow_code in ("M", "X"):
+            params: dict[str, Any] = {
+                "reporterCode": reporter_num,
+                "period": period,
+                "flowCode": flow_code,
+            }
+            if hs_codes:
+                params["cmdCode"] = ",".join(hs_codes)
+
+            try:
+                data = get_json(base_url, params=params, headers=headers)
+                dataset = data.get("data", []) if isinstance(data, dict) else data
+                if isinstance(dataset, list):
+                    records.extend(dataset)
+            except Exception:
+                logger.exception(
+                    "Comtrade fetch failed for reporter=%s flow=%s period=%s",
+                    reporter_iso3,
+                    flow_code,
+                    period,
+                )
+            rate_limit_wait(1.0)
 
     logger.info("Extracted %d comtrade records for period=%s", len(records), period)
     return records
